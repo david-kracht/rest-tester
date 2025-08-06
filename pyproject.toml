@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "rest-tester"
+version = "0.0.2"
+description = "Test Application für REST APIs (Server and Client)"
+authors = ["David Kracht <david.kracht@mail.de>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/david-kracht/rest-tester"
+repository = "https://github.com/david-kracht/rest-tester"
+keywords = ["rest", "api", "testing", "server", "client"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
+packages = [
+    {include = "rest_tester", from = "src" },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.14"
+requests = "^2.32.4"
+flask = "^3.0.3"
+werkzeug = "^3.0.3"
+pyyaml = "^6.0.1"
+PySide6 = "^6.7.0"
+ruamel-yaml = "^0.18.6"
+rfc3986 = "^2.0.0"
+jinja2 = "^3.1.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.4.4"
+
+[tool.poetry.scripts]
+rest-tester = "rest_tester.main:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
