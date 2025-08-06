@@ -1,209 +1,59 @@
-name: Build and Deploy
+name: CI/CD PyPI Release
 
 on:
   push:
-    branches: [ "*" ]
-  pull_request:
-    branches: [ main, master ]
-  release:
-    types: [published]
-
-env:
-  PYTHON_VERSION: "3.11"
+    tags:
+      - '*.*.*'
+    branches:
+      - main
 
 jobs:
-  test:
+  publish:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Install Poetry
+        run: |
+          pip install poetry
 
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-
-    - name: Load cached venv
-      id: cached-poetry-dependencies
-      uses: actions/cache@v3
-      with:
-        path: .venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
-    - name: Install dependencies
-      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-      run: poetry install --no-interaction --no-root
-
-    - name: Install project
-      run: poetry install --no-interaction
-
-    - name: Run tests
-      run: |
-        if [ -d "tests" ] || find . -name "test_*.py" -o -name "*_test.py" | grep -q .; then
-          poetry run pytest -v
-        else
-          echo "No tests found, skipping test execution"
-        fi
-
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      is-dev: ${{ steps.version.outputs.is-dev }}
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-
-    - name: Determine version
-      id: version
-      run: |
-        BASE_VERSION=$(poetry version -s)
-        
-        if [[ "${{ github.event_name }}" == "release" ]]; then
-          # Release: Verwende Tag-Version
+      - name: Set version from tag (if tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/}
-          VERSION=${TAG_VERSION#v}
-          IS_DEV=false
-          echo "Release version: ${VERSION}"
-        else
-          # Development: Eindeutige Dev-Version
-          COMMIT_SHORT=$(git rev-parse --short HEAD)
-          TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          VERSION="${BASE_VERSION}.dev${TIMESTAMP}+${COMMIT_SHORT}"
-          IS_DEV=true
-          echo "Development version: ${VERSION}"
-        fi
-        
-        echo "version=${VERSION}" >> $GITHUB_OUTPUT
-        echo "is-dev=${IS_DEV}" >> $GITHUB_OUTPUT
-        
-        # Version setzen
-        poetry version ${VERSION}
+          poetry version $TAG_VERSION
 
-    - name: Build package
-      run: poetry build
+      - name: Set version from last tag (if not tag)
+        if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0)
+          poetry version $LAST_TAG
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: dist-${{ steps.version.outputs.version }}
-        path: dist/
-        retention-days: 30
+      - name: Build package
+        run: |
+          poetry build
 
-  deploy-test:
-    needs: build
-    runs-on: ubuntu-latest
-    # Nur für Development Versions und nicht für PRs
-    if: needs.build.outputs.is-dev == 'true' && github.event_name == 'push'
-    
-    steps:
-    - uses: actions/checkout@v4
+      - name: Publish to PyPI (tagged)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          PYPI_API_TOKEN : ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          poetry config repositories.upload https://upload.pypi.org/legacy/
+          poetry config pypi-token.upload $PYPI_API_TOKEN
+          poetry publish -r upload -n --skip-existing
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-
-    - name: Download artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: dist-${{ needs.build.outputs.version }}
-        path: dist/
-
-    - name: Configure Poetry for Test PyPI
-      run: |
-        poetry config repositories.testpypi https://test.pypi.org/legacy/
-        poetry config pypi-token.testpypi ${{ secrets.TEST_PYPI_API_TOKEN }}
-
-    - name: Publish to Test PyPI
-      run: |
-        echo "Publishing version ${{ needs.build.outputs.version }} to Test PyPI..."
-        poetry publish -r testpypi --dry-run  # Test first
-        poetry publish -r testpypi
-
-  deploy-prod:
-    needs: build
-    runs-on: ubuntu-latest
-    # Nur für Releases
-    if: github.event_name == 'release' && github.event.action == 'published'
-    
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-
-    - name: Download artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: dist-${{ needs.build.outputs.version }}
-        path: dist/
-
-    - name: Configure Poetry for PyPI
-      run: |
-        poetry config pypi-token.pypi ${{ secrets.PYPI_API_TOKEN }}
-
-    - name: Publish to PyPI
-      run: |
-        echo "Publishing version ${{ needs.build.outputs.version }} to PyPI..."
-        poetry publish --dry-run  # Test first
-        poetry publish
-
-    - name: Find wheel file
-      id: find-wheel
-      run: |
-        WHEEL_FILE=$(find dist/ -name "*.whl" | head -1)
-        TARBALL_FILE=$(find dist/ -name "*.tar.gz" | head -1)
-        echo "wheel-file=${WHEEL_FILE}" >> $GITHUB_OUTPUT
-        echo "tarball-file=${TARBALL_FILE}" >> $GITHUB_OUTPUT
-
-    - name: Upload wheel to release
-      if: steps.find-wheel.outputs.wheel-file != ''
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ${{ steps.find-wheel.outputs.wheel-file }}
-        asset_name: ${{ github.event.repository.name }}-${{ needs.build.outputs.version }}-py3-none-any.whl
-        asset_content_type: application/zip
-
-    - name: Upload source distribution to release
-      if: steps.find-wheel.outputs.tarball-file != ''
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ${{ steps.find-wheel.outputs.tarball-file }}
-        asset_name: ${{ github.event.repository.name }}-${{ needs.build.outputs.version }}.tar.gz
-        asset_content_type: application/gzip
+      - name: Publish to TestPyPI (main branch, not tag)
+        if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+        env:
+          PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        run: |
+          poetry config repositories.test https://test.pypi.org/legacy/
+          poetry config pypi-token.test $PYPI_API_TOKEN
+          poetry publish -r test -n --skip-existing
