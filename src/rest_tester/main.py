@@ -31,7 +31,7 @@ def get_config_path():
         return local_config
 
     # If no local config, create one from the package template
-    resources_config = importlib.resources.files('rest_tester').joinpath('config.yaml')
+    resources_config = importlib.resources.files('rest_tester').joinpath('../resources/config.yaml')
     if os.path.exists(resources_config):
         print(f"Using resource config (automatically deployed): {os.path.abspath(resources_config)}")
         return resources_config
