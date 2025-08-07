@@ -16,7 +16,8 @@ def get_config_path():
     """
     Get the path to the config file with the following priority:
     1. resources/config.yaml in current working directory (user config)
-    2. Default config from the installed package
+    2. config.yaml in current working directory (user config)
+    3. Default config from the installed package (creates temp copy)
     """
     # First, check if there's a user config (local config) development (default config)
     local_config = "resources/config.yaml"
@@ -30,13 +31,27 @@ def get_config_path():
         print(f"Using local config (custom config): {os.path.abspath(local_config)}")
         return local_config
 
-    # If no local config, create one from the package template
-    resources_config = importlib.resources.files('rest_tester').joinpath('../resources/config.yaml')
-    if os.path.exists(resources_config):
-        print(f"Using resource config (automatically deployed): {os.path.abspath(resources_config)}")
-        return resources_config
-    else:
-        raise FileNotFoundError(f"No resource config (should be automatically deployed) found here: {os.path.abspath(resources_config)}")
+    # If no local config, use the resource from the package
+    try:
+        # Use importlib.resources to access the config.yaml from the installed package
+        resources_ref = importlib.resources.files('rest_tester') / 'resources' / 'config.yaml'
+        
+        if resources_ref.is_file():
+            # Use as_file context manager to get a file path that ConfigModel can use
+            # Note: We need to keep the file available for the entire application lifetime
+            global _temp_config_file
+            _temp_config_file = importlib.resources.as_file(resources_ref)
+            temp_path = _temp_config_file.__enter__()
+            print(f"Using resource config (automatically deployed): {temp_path}")
+            return str(temp_path)
+        else:
+            raise FileNotFoundError("Resource config.yaml not found in package")
+            
+    except Exception as e:
+        raise FileNotFoundError(f"Failed to load resource config: {e}")
+
+# Global variable to keep the context manager alive
+_temp_config_file = None
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -99,7 +114,14 @@ def main():
         timer = setup_signal_handling(app, window)
         
         # Run application
-        sys.exit(app.exec())
+        exit_code = app.exec()
+        
+        # Clean up temporary config file if it was created
+        global _temp_config_file
+        if _temp_config_file is not None:
+            _temp_config_file.__exit__(None, None, None)
+            
+        sys.exit(exit_code)
         
     except ImportError as e:
         print(f"Error importing required modules: {e}")
