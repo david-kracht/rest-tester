@@ -22,7 +22,8 @@ class ServerInstance:
         return self.values.get(key, self.defaults.get(key))
 
     def is_default(self, key):
-        return self.values.get(key, self.defaults.get(key)) == self.defaults.get(key)
+        #return self.values.get(key, self.defaults.get(key)) == self.defaults.get(key)
+        return key not in self.config or not self.config[key]
 
     def to_yaml(self):
         data = {k: v for k, v in self.config.items() if v != self.defaults.get(k)}
@@ -56,7 +57,8 @@ class ClientInstance:
         return self.values.get(key, self.defaults.get(key))
 
     def is_default(self, key):
-        return self.values.get(key, self.defaults.get(key)) == self.defaults.get(key)
+        #return self.values.get(key, self.defaults.get(key)) == self.defaults.get(key)
+        return key not in self.config or not self.config[key]
 
     def to_yaml(self):
         data = {k: v for k, v in self.config.items() if v != self.defaults.get(k)}

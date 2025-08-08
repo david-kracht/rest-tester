@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QSplitter, QTabWidget, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QLineEdit
 )
 from PySide6.QtCore import Qt, QEvent
-from .gui_model import ConfigModel, ServerInstance, ClientInstance, ServerInstanceWidget, ClientInstanceWidget
+from .gui_model import ConfigModel, ServerInstance, ClientInstance, ServerInstanceWidget, ClientInstanceWidget, DefaultsWidget
 
 class InstanceTabWidget(QWidget):
     def __init__(self, config, is_server=True, manager=None):
@@ -43,7 +43,13 @@ class InstanceTabWidget(QWidget):
         btn_layout.addWidget(self.update_btn)
         btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.del_btn)
+        
+        # Create defaults widget
+        self.defaults_widget = DefaultsWidget(config, is_server)
+        self.defaults_widget.defaults_changed.connect(self._on_defaults_changed)
+        
         layout = QVBoxLayout(self)
+        layout.addWidget(self.defaults_widget)
         layout.addWidget(self.tabs)
         layout.addLayout(btn_layout)
         self.setLayout(layout)
@@ -302,6 +308,79 @@ class InstanceTabWidget(QWidget):
 
     def _update_delete_button(self):
         self.del_btn.setEnabled(self.tabs.count() > 1)
+
+    def _on_defaults_changed(self):
+        """Called when default values are changed."""
+        # Update all instance widgets to reflect new defaults
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            if self.is_server:
+                # Update server instance defaults reference
+                widget.server.defaults = self.config.raw['defaults']['server']
+                # Refresh widgets that display default values
+                self._refresh_instance_widget(widget)
+            else:
+                # Update client instance defaults reference
+                widget.client.defaults = self.config.raw['defaults']['client']
+                # Update server_methods reference for client instances
+                widget.client.server_methods = self.config.raw['defaults']['server']['methodes']
+                # Refresh widgets that display default values
+                self._refresh_instance_widget(widget)
+
+    def _refresh_instance_widget(self, widget):
+        """Refresh an instance widget to show updated default values."""
+        if self.is_server:
+            # Update the values dictionary with new defaults for unchanged fields
+            for key, default_value in widget.server.defaults.items():
+                if widget.server.is_default(key):
+                    widget.server.values[key] = default_value
+ 
+            # Update text for fields that are at default values
+            if widget.server.is_default('host'):
+                widget.host_edit.setText(widget.server.get_value('host'))
+            if widget.server.is_default('autostart'):
+                widget.autostart_box.setChecked(widget.server.get_value('autostart'))
+            if widget.server.is_default('initial_delay_sec'):
+                widget.initial_delay_edit.setText(str(widget.server.get_value('initial_delay_sec')))
+            if widget.server.is_default('response_delay_sec'):
+                widget.delay_edit.setText(str(widget.server.get_value('response_delay_sec')))
+            if widget.server.is_default('route'):
+                widget.route_edit.setText(widget.server.get_value('route'))
+            if widget.server.is_default('response'):
+                widget.response_edit.setPlainText(widget.server.get_value('response') or "")
+                
+            # Update methods checkboxes if at default
+            if widget.server.is_default('methodes'):
+                current_methods = widget.server.get_value('methodes') or []
+                for cb in widget.methods_checks:
+                    cb.setChecked(cb.text() in current_methods)
+        else:
+            # Update the values dictionary with new defaults for unchanged fields
+            for key, default_value in widget.client.defaults.items():
+                if widget.client.is_default(key):
+                    widget.client.values[key] = default_value
+            
+            # Update text for fields that are at default values
+            if widget.client.is_default('host'):
+                widget.host_edit.setText(widget.client.get_value('host'))
+            if widget.client.is_default('autostart'):
+                widget.autostart_box.setChecked(widget.client.get_value('autostart'))
+            if widget.client.is_default('initial_delay_sec'):
+                widget.initial_delay_edit.setText(str(widget.client.get_value('initial_delay_sec')))
+            if widget.client.is_default('loop'):
+                widget.loop_box.setChecked(widget.client.get_value('loop'))
+            if widget.client.is_default('period_sec'):
+                widget.period_edit.setText(str(widget.client.get_value('period_sec')))
+            if widget.client.is_default('route'):
+                widget.route_edit.setText(widget.client.get_value('route'))
+            if widget.client.is_default('request'):
+                widget.request_edit.setPlainText(widget.client.get_value('request') or "")
+                
+            # Update method checkboxes if at default
+            if widget.client.is_default('methode'):
+                current_method = widget.client.get_value('methode')
+                for cb in widget.methode_checks:
+                    cb.setChecked(cb.text() == current_method)
 
 class MainWindow(QWidget):
     def __init__(self, config):

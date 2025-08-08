@@ -22,7 +22,10 @@ class ClientThread(threading.Thread):
         )
 
     def run(self):
+
         url = f"http://{self.host}{self.route}"
+        
+
         time.sleep(self.initial_delay_sec)
         while not self._stop_event.is_set():
             try:
@@ -37,10 +40,13 @@ class ClientThread(threading.Thread):
                     except Exception:
                         data = self.request_data
                 resp = requests.request(self.method, url, json=json_data, data=data, headers=headers)
+
+
                 if self.on_response:
                     self.on_response(self.name, resp)
                 else:
                     print(f"[Client {self.name}] Response: {resp.status_code} {resp.text}")
+
             except Exception as e:
                 print(f"[Client {self.name}] Error: {e}")
             if not self.loop:
