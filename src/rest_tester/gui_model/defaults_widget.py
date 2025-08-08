@@ -1,4 +1,7 @@
 import json
+import re
+import socket
+import rfc3986
 from PySide6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QCheckBox, QHBoxLayout, QTextEdit, QGroupBox, QVBoxLayout
 )
@@ -44,7 +47,8 @@ class DefaultsWidget(QWidget):
         """Create widgets for server defaults."""
         # Host
         self.host_edit = QLineEdit(self.defaults.get('host', ''))
-        self.host_edit.textChanged.connect(lambda val: self._on_edit('host', val))
+        self.host_edit.textChanged.connect(lambda val: self._on_host_edit('host', val))
+        self.host_edit.focusOutEvent = lambda event: self._host_focus_out_event(event)
         self.layout.addRow("Host", self.host_edit)
         
         # Autostart
@@ -55,17 +59,20 @@ class DefaultsWidget(QWidget):
         
         # Initial Delay
         self.initial_delay_edit = QLineEdit(str(self.defaults.get('initial_delay_sec', 0.0)))
-        self.initial_delay_edit.textChanged.connect(lambda val: self._on_edit('initial_delay_sec', val))
+        self.initial_delay_edit.textChanged.connect(lambda val: self._on_numeric_edit('initial_delay_sec', val, self.initial_delay_edit))
+        self.initial_delay_edit.focusOutEvent = lambda event: self._numeric_focus_out_event(event, 'initial_delay_sec', self.initial_delay_edit)
         self.layout.addRow("Initial Delay (s)", self.initial_delay_edit)
         
         # Response Delay
         self.response_delay_edit = QLineEdit(str(self.defaults.get('response_delay_sec', 0.0)))
-        self.response_delay_edit.textChanged.connect(lambda val: self._on_edit('response_delay_sec', val))
+        self.response_delay_edit.textChanged.connect(lambda val: self._on_numeric_edit('response_delay_sec', val, self.response_delay_edit))
+        self.response_delay_edit.focusOutEvent = lambda event: self._numeric_focus_out_event(event, 'response_delay_sec', self.response_delay_edit)
         self.layout.addRow("Response Delay (s)", self.response_delay_edit)
         
         # Route
         self.route_edit = QLineEdit(self.defaults.get('route', ''))
-        self.route_edit.textChanged.connect(lambda val: self._on_edit('route', val))
+        self.route_edit.textChanged.connect(lambda val: self._on_route_edit('route', val))
+        self.route_edit.focusOutEvent = lambda event: self._route_focus_out_event(event)
         self.layout.addRow("Route", self.route_edit)
         
         # Methods (horizontal checkboxes)
@@ -94,11 +101,21 @@ class DefaultsWidget(QWidget):
         # Initial validation
         self._validate_and_pretty_response()
         
+        # Initial host validation
+        self._validate_initial_host()
+        
+        # Initial numeric validation
+        self._validate_initial_numeric()
+        
+        # Initial route validation
+        self._validate_initial_route()
+        
     def _create_client_widgets(self):
         """Create widgets for client defaults."""
         # Host
         self.host_edit = QLineEdit(self.defaults.get('host', ''))
-        self.host_edit.textChanged.connect(lambda val: self._on_edit('host', val))
+        self.host_edit.textChanged.connect(lambda val: self._on_host_edit('host', val))
+        self.host_edit.focusOutEvent = lambda event: self._host_focus_out_event(event)
         self.layout.addRow("Host", self.host_edit)
         
         # Autostart
@@ -109,7 +126,8 @@ class DefaultsWidget(QWidget):
         
         # Initial Delay
         self.initial_delay_edit = QLineEdit(str(self.defaults.get('initial_delay_sec', 0.0)))
-        self.initial_delay_edit.textChanged.connect(lambda val: self._on_edit('initial_delay_sec', val))
+        self.initial_delay_edit.textChanged.connect(lambda val: self._on_numeric_edit('initial_delay_sec', val, self.initial_delay_edit))
+        self.initial_delay_edit.focusOutEvent = lambda event: self._numeric_focus_out_event(event, 'initial_delay_sec', self.initial_delay_edit)
         self.layout.addRow("Initial Delay (s)", self.initial_delay_edit)
         
         # Loop
@@ -120,12 +138,14 @@ class DefaultsWidget(QWidget):
         
         # Period
         self.period_edit = QLineEdit(str(self.defaults.get('period_sec', 1.0)))
-        self.period_edit.textChanged.connect(lambda val: self._on_edit('period_sec', val))
+        self.period_edit.textChanged.connect(lambda val: self._on_numeric_edit('period_sec', val, self.period_edit))
+        self.period_edit.focusOutEvent = lambda event: self._numeric_focus_out_event(event, 'period_sec', self.period_edit)
         self.layout.addRow("Period (s)", self.period_edit)
         
         # Route
         self.route_edit = QLineEdit(self.defaults.get('route', ''))
-        self.route_edit.textChanged.connect(lambda val: self._on_edit('route', val))
+        self.route_edit.textChanged.connect(lambda val: self._on_route_edit('route', val))
+        self.route_edit.focusOutEvent = lambda event: self._route_focus_out_event(event)
         self.layout.addRow("Route", self.route_edit)
         
         # Method (exclusive checkboxes)
@@ -154,20 +174,263 @@ class DefaultsWidget(QWidget):
         # Initial validation
         self._validate_and_pretty_request()
         
+        # Initial host validation
+        self._validate_initial_host()
+        
+        # Initial numeric validation
+        self._validate_initial_numeric()
+        
+        # Initial route validation
+        self._validate_initial_route()
+        
+    def _on_host_edit(self, key, val):
+        """Handle host field changes."""
+        self._on_edit(key, val)
+    
+    def _host_focus_out_event(self, event):
+        """Validate host format and update styling."""
+        from PySide6.QtWidgets import QLineEdit
+        QLineEdit.focusOutEvent(self.host_edit, event)
+        
+        host = self.host_edit.text().strip()
+        is_valid = self._validate_host(host)
+        
+        if is_valid:
+            self.host_edit.setStyleSheet("")
+        else:
+            self.host_edit.setStyleSheet("background-color: #ffcccc; border: 1px solid red;")
+    
+    def _validate_host(self, host):
+        """Validate host format (IP address or hostname with optional port)."""
+        if not host:
+            return False
+        
+        # Check if host includes port
+        if ':' in host:
+            host_part, port_part = host.rsplit(':', 1)
+            
+            # Validate port range
+            try:
+                port = int(port_part)
+                if not (0 <= port <= 65535):
+                    return False
+            except ValueError:
+                return False
+        else:
+            host_part = host
+        
+        # Validate IP address format
+        ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        if re.match(ip_pattern, host_part):
+            return True
+        
+        # Validate hostname format
+        hostname_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
+        if re.match(hostname_pattern, host_part):
+            return True
+        
+        # Check if it's localhost or valid hostname using socket
+        try:
+            socket.gethostbyname(host_part)
+            return True
+        except socket.gaierror:
+            return False
+
+    def _validate_initial_host(self):
+        """Validate host field on startup and set styling accordingly."""
+        host = self.host_edit.text().strip()
+        is_valid = self._validate_host(host)
+        
+        if not is_valid:
+            self.host_edit.setStyleSheet("background-color: #ffcccc; border: 1px solid red;")
+        else:
+            self.host_edit.setStyleSheet("")
+
+    def _validate_initial_numeric(self):
+        """Validate numeric fields on startup and set styling accordingly."""
+        numeric_fields = []
+        
+        # Add fields based on server or client type
+        if self.is_server:
+            numeric_fields = [
+                ('initial_delay_sec', self.initial_delay_edit),
+                ('response_delay_sec', self.response_delay_edit)
+            ]
+        else:
+            numeric_fields = [
+                ('initial_delay_sec', self.initial_delay_edit),
+                ('period_sec', self.period_edit)
+            ]
+        
+        for key, widget in numeric_fields:
+            value = widget.text().strip()
+            is_valid = self._validate_numeric(value)
+            
+            if not is_valid:
+                widget.setStyleSheet("background-color: #ffcccc; border: 1px solid red;")
+            else:
+                widget.setStyleSheet("")
+
+    def _validate_numeric(self, value):
+        """Validate that value is a positive number (int or float)."""
+        if not value:
+            return False
+        
+        try:
+            num_value = float(value)
+            return num_value >= 0
+        except (ValueError, TypeError):
+            return False
+
+    def _validate_route(self, route):
+        """Validate route format according to RFC 3986."""
+        if not route:
+            return False
+        
+        try:
+            # Parse the route as a URI path
+            # Routes should start with / for HTTP endpoints
+            if not route.startswith('/'):
+                return False
+            
+            # Use rfc3986 to validate the URI structure
+            # Create a minimal URI with the route as path
+            test_uri = f"http://example.com{route}"
+            uri = rfc3986.uri_reference(test_uri)
+            
+            # Validate the URI
+            validator = rfc3986.validators.Validator().require_presence_of('scheme', 'host')
+            validator.validate(uri)
+            
+            # Additional checks for path component
+            if uri.path is None:
+                return False
+                
+            # Check for valid path characters (allowing query parameters and templates)
+            # Path should not contain spaces or other invalid characters
+            # Allow Jinja2 template syntax like {{counter}}
+            path_part = route.split('?')[0]  # Get path without query
+            if ' ' in path_part:
+                return False
+            
+            # Check for invalid control characters but allow template syntax
+            for c in path_part:
+                if ord(c) < 32 or ord(c) > 126:
+                    return False
+                
+            return True
+            
+        except Exception:
+            return False
+
+    def _validate_initial_route(self):
+        """Validate route field on startup and set styling accordingly."""
+        route = self.route_edit.text().strip()
+        is_valid = self._validate_route(route)
+        
+        if not is_valid:
+            self.route_edit.setStyleSheet("background-color: #ffcccc; border: 1px solid red;")
+        else:
+            self.route_edit.setStyleSheet("")
+
+    def _on_route_edit(self, key, val):
+        """Handle route field changes."""
+        is_valid = self._validate_route(val)
+        
+        if is_valid:
+            self._on_edit(key, val)
+            self.route_edit.setStyleSheet("")
+        else:
+            self.route_edit.setStyleSheet("background-color: #ffcccc; border: 1px solid red;")
+
+    def _route_focus_out_event(self, event):
+        """Validate route format and update styling."""
+        from PySide6.QtWidgets import QLineEdit
+        QLineEdit.focusOutEvent(self.route_edit, event)
+        
+        route = self.route_edit.text().strip()
+        is_valid = self._validate_route(route)
+        
+        if is_valid:
+            self.route_edit.setStyleSheet("")
+            self._on_edit('route', route)
+        else:
+            self.route_edit.setStyleSheet("background-color: #ffcccc; border: 1px solid red;")
+
+    def _on_numeric_edit(self, key, value, widget):
+        """Handle numeric field changes with validation."""
+        is_valid = self._validate_numeric(value)
+        
+        if is_valid:
+            self._on_edit(key, value)
+            widget.setStyleSheet("")
+        else:
+            widget.setStyleSheet("background-color: #ffcccc; border: 1px solid red;")
+
     def _on_edit(self, key, value):
         """Handle value changes."""
         # Convert numeric values
         if key in ['initial_delay_sec', 'response_delay_sec', 'period_sec']:
             try:
                 value = float(value)
-            except ValueError:
-                return  # Invalid value, ignore
+            except (ValueError, TypeError):
+                # Bei ungültiger Eingabe nichts tun
+                return
         
         # Update the defaults
         self.defaults[key] = value
         
         # Emit signal that defaults changed
         self.defaults_changed.emit()
+        
+    def _numeric_focus_out_event(self, event, key, widget):
+        """Handle focus out for numeric fields to ensure proper float formatting."""
+        from PySide6.QtWidgets import QLineEdit
+        try:
+            # Hole den aktuellen Wert und konvertiere zu Float
+            current_text = widget.text().strip()
+            if current_text == "":
+                # Wenn leer, verwende Default - hol aus ursprünglichen config defaults
+                if self.is_server:
+                    default_value = self.config.raw['defaults']['server'].get(key, 0.0)
+                else:
+                    default_value = self.config.raw['defaults']['client'].get(key, 0.0)
+                widget.setText(str(float(default_value)))
+                self.defaults[key] = float(default_value)
+                widget.setStyleSheet("")
+            else:
+                # Validiere den Wert
+                is_valid = self._validate_numeric(current_text)
+                if is_valid:
+                    # Konvertiere zu Float und formatiere
+                    float_value = float(current_text)
+                    widget.setText(str(float_value))
+                    self.defaults[key] = float_value
+                    widget.setStyleSheet("")
+                else:
+                    # Bei ungültiger Eingabe, verwende Default
+                    if self.is_server:
+                        default_value = self.config.raw['defaults']['server'].get(key, 0.0)
+                    else:
+                        default_value = self.config.raw['defaults']['client'].get(key, 0.0)
+                    widget.setText(str(float(default_value)))
+                    self.defaults[key] = float(default_value)
+                    widget.setStyleSheet("")
+        except (ValueError, TypeError):
+            # Bei ungültiger Eingabe, verwende Default
+            if self.is_server:
+                default_value = self.config.raw['defaults']['server'].get(key, 0.0)
+            else:
+                default_value = self.config.raw['defaults']['client'].get(key, 0.0)
+            widget.setText(str(float(default_value)))
+            self.defaults[key] = float(default_value)
+            widget.setStyleSheet("")
+        
+        # Signal senden, dass sich defaults geändert haben
+        self.defaults_changed.emit()
+        
+        # Original focus out event aufrufen
+        super(QLineEdit, widget).focusOutEvent(event)
         
     def _on_methods_changed(self):
         """Handle server methods selection (multiple allowed)."""

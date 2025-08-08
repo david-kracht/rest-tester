@@ -2,7 +2,7 @@ import importlib
 import sys
 import threading
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QSplitter, QTabWidget, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QLineEdit
+    QApplication, QWidget, QSplitter, QTabWidget, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox, QLineEdit, QGroupBox, QMenu, QTabBar
 )
 from PySide6.QtCore import Qt, QEvent
 from .gui_model import ConfigModel, ServerInstance, ClientInstance, ServerInstanceWidget, ClientInstanceWidget, DefaultsWidget
@@ -18,43 +18,43 @@ class InstanceTabWidget(QWidget):
         self.tabs.tabCloseRequested.connect(self._on_close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.tabs.tabBar().installEventFilter(self)
+        self.tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabs.tabBar().customContextMenuRequested.connect(self._show_tab_context_menu)
         self.tabs.tabBarDoubleClicked = getattr(self.tabs, 'tabBarDoubleClicked', None)
         if hasattr(self.tabs, 'tabBarDoubleClicked'):
             self.tabs.tabBarDoubleClicked.connect(self._on_tab_rename)
 
+        # Flag um zu tracken ob wir gerade den + Tab hinzufügen/entfernen
+        self._updating_plus_tab = False
+
         # Buttons
-        self.add_btn = QPushButton("New")
-        self.reset_btn = QPushButton("Reset")
         self.update_btn = QPushButton("Start/Update")
         self.stop_btn = QPushButton("Stop")
-        self.del_btn = QPushButton("Remove")
-        self.add_btn.clicked.connect(self._add_instance)
-        self.reset_btn.clicked.connect(self._reset_instance)
         if self.is_server:
             self.update_btn.clicked.connect(self._update_endpoint)
             self.stop_btn.clicked.connect(self._stop_endpoint)
         else:
             self.update_btn.clicked.connect(self._start_client_request)
             self.stop_btn.clicked.connect(self._stop_client_request)
-        self.del_btn.clicked.connect(self._delete_instance)
         btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.add_btn)
-        btn_layout.addWidget(self.reset_btn)
         btn_layout.addWidget(self.update_btn)
         btn_layout.addWidget(self.stop_btn)
-        btn_layout.addWidget(self.del_btn)
         
         # Create defaults widget
         self.defaults_widget = DefaultsWidget(config, is_server)
         self.defaults_widget.defaults_changed.connect(self._on_defaults_changed)
         
+        # Create instances group box
+        self.instances_group = QGroupBox("Instances")
+        instances_layout = QVBoxLayout(self.instances_group)
+        instances_layout.addWidget(self.tabs)
+        instances_layout.addLayout(btn_layout)
+        
         layout = QVBoxLayout(self)
         layout.addWidget(self.defaults_widget)
-        layout.addWidget(self.tabs)
-        layout.addLayout(btn_layout)
+        layout.addWidget(self.instances_group)
         self.setLayout(layout)
         self._init_tabs()
-        self._update_delete_button()
         # Autostart: Endpunkte/Clients beim Start registrieren
         if self.is_server and self.manager:
             for inst in self.config.servers:
@@ -72,6 +72,29 @@ class InstanceTabWidget(QWidget):
                 self._on_tab_rename(index)
             return True
         return super().eventFilter(obj, event)
+
+    def _show_tab_context_menu(self, position):
+        """Zeigt Kontextmenü für Tab-Bar an"""
+        index = self.tabs.tabBar().tabAt(position)
+        if index < 0:
+            return
+            
+        # Kontextmenü nicht für den + Tab anzeigen
+        if self._is_plus_tab(index):
+            return
+            
+        menu = QMenu(self)
+        
+        # Clone-Aktion
+        clone_action = menu.addAction("Clone")
+        clone_action.triggered.connect(lambda: self._clone_instance(index))
+        
+        # Reset-Aktion
+        reset_action = menu.addAction("Reset")
+        reset_action.triggered.connect(lambda: self._reset_instance_by_index(index))
+        
+        # Zeige Menü an der Mausposition
+        menu.exec_(self.tabs.tabBar().mapToGlobal(position))
 
     def _on_tab_rename(self, index):
         tab_bar = self.tabs.tabBar()
@@ -222,8 +245,39 @@ class InstanceTabWidget(QWidget):
         for inst in instances:
             widget = ServerInstanceWidget(inst) if self.is_server else ClientInstanceWidget(inst)
             self.tabs.addTab(widget, inst.name)
+        
+        # Füge den + Tab hinzu
+        self._add_plus_tab()
+
+    def _add_plus_tab(self):
+        """Fügt einen kleinen + Tab am Ende hinzu"""
+        if not self._updating_plus_tab:
+            self._updating_plus_tab = True
+            # Erstelle einen leeren Widget für den + Tab
+            plus_widget = QWidget()
+            plus_index = self.tabs.addTab(plus_widget, "+")
+            # Mache den + Tab nicht schließbar
+            self.tabs.tabBar().setTabButton(plus_index, QTabBar.ButtonPosition.RightSide, None)
+            self._updating_plus_tab = False
+
+    def _is_plus_tab(self, index):
+        """Prüft ob der gegebene Index der + Tab ist"""
+        return index >= 0 and self.tabs.tabText(index) == "+"
+
+    def _remove_plus_tab(self):
+        """Entfernt den + Tab temporär"""
+        if not self._updating_plus_tab:
+            self._updating_plus_tab = True
+            for i in range(self.tabs.count()):
+                if self._is_plus_tab(i):
+                    self.tabs.removeTab(i)
+                    break
+            self._updating_plus_tab = False
 
     def _add_instance(self):
+        # Entferne + Tab temporär
+        self._remove_plus_tab()
+        
         base = "Server" if self.is_server else "Client"
         if self.is_server:
             existing = [inst.name for inst in self.config.servers]
@@ -245,13 +299,76 @@ class InstanceTabWidget(QWidget):
             self.config.clients.append(inst)
             widget = ClientInstanceWidget(inst)
         self.tabs.addTab(widget, name)
-        self.tabs.setCurrentIndex(self.tabs.count()-1)
-        self._update_delete_button()
+        
+        # Füge + Tab wieder hinzu
+        self._add_plus_tab()
+        
+        # Wechsle zum neuen Tab (nicht zum + Tab)
+        self.tabs.setCurrentIndex(self.tabs.count()-2)
+
+    def _clone_instance(self, source_index):
+        """Klont eine Instanz basierend auf dem gegebenen Index"""
+        if source_index < 0 or source_index >= self.tabs.count() or self._is_plus_tab(source_index):
+            return
+            
+        # Entferne + Tab temporär
+        self._remove_plus_tab()
+            
+        # Hole die Quell-Instanz
+        if self.is_server:
+            source_inst = self.config.servers[source_index]
+            existing = [inst.name for inst in self.config.servers]
+            base = source_inst.name
+        else:
+            source_inst = getattr(self.config, 'clients', [])[source_index]
+            existing = [inst.name for inst in getattr(self.config, 'clients', [])]
+            base = source_inst.name
+            
+        # Finde einen eindeutigen Namen für den Klon
+        clone_name = f"{base}_copy"
+        idx = 1
+        while clone_name in existing:
+            clone_name = f"{base}_copy{idx}"
+            idx += 1
+            
+        # Erstelle neue Instanz mit kopierten Werten
+        if self.is_server:
+            # Kopiere alle Werte aus der Quell-Instanz
+            clone_inst = ServerInstance(clone_name, source_inst.defaults)
+            for key, value in source_inst.values.items():
+                clone_inst.set_value(key, value)
+            # Füge in die Liste an der richtigen Position ein (nach source_index)
+            self.config.servers.insert(source_index + 1, clone_inst)
+            widget = ServerInstanceWidget(clone_inst)
+        else:
+            # Kopiere alle Werte aus der Quell-Instanz
+            clone_inst = ClientInstance(clone_name, source_inst.defaults, source_inst.server_methods)
+            for key, value in source_inst.values.items():
+                clone_inst.set_value(key, value)
+            # Füge in die Liste an der richtigen Position ein (nach source_index)
+            self.config.clients.insert(source_index + 1, clone_inst)
+            widget = ClientInstanceWidget(clone_inst)
+            
+        # Füge Tab an der richtigen Position hinzu (nach source_index)
+        self.tabs.insertTab(source_index + 1, widget, clone_name)
+        
+        # Füge + Tab wieder hinzu
+        self._add_plus_tab()
+        
+        # Wechsle zum neuen Tab
+        self.tabs.setCurrentIndex(source_index + 1)
 
     def _reset_instance(self):
         idx = self.tabs.currentIndex()
         if idx < 0:
             return
+        self._reset_instance_by_index(idx)
+
+    def _reset_instance_by_index(self, idx):
+        """Reset eine Instanz basierend auf dem gegebenen Index"""
+        if idx < 0 or idx >= self.tabs.count():
+            return
+            
         widget = self.tabs.widget(idx)
         # Unterscheide zwischen Server und Client
         if self.is_server:
@@ -259,6 +376,7 @@ class InstanceTabWidget(QWidget):
                 widget.server.set_value(key, widget.server.defaults[key])
             widget.host_edit.setText(widget.server.get_value('host'))
             widget.autostart_box.setChecked(widget.server.get_value('autostart'))
+            widget.initial_delay_edit.setText(str(widget.server.get_value('initial_delay_sec')))
             widget.delay_edit.setText(str(widget.server.get_value('response_delay_sec')))
             widget.route_edit.setText(widget.server.get_value('route'))
             default_methods = widget.server.defaults.get('methodes', [])
@@ -270,6 +388,7 @@ class InstanceTabWidget(QWidget):
                 widget.client.set_value(key, widget.client.defaults[key])
             widget.host_edit.setText(widget.client.get_value('host'))
             widget.autostart_box.setChecked(widget.client.get_value('autostart'))
+            widget.initial_delay_edit.setText(str(widget.client.get_value('initial_delay_sec')))
             widget.loop_box.setChecked(widget.client.get_value('loop'))
             widget.period_edit.setText(str(widget.client.get_value('period_sec')))
             widget.route_edit.setText(widget.client.get_value('route'))
@@ -278,11 +397,18 @@ class InstanceTabWidget(QWidget):
             widget.request_edit.setPlainText(widget.client.get_value('request') if widget.client.get_value('request') else "")
 
     def _delete_instance(self):
-        if self.tabs.count() <= 1:
-            return  # Keine Warnung mehr, Button ist dann sowieso disabled
-        idx = self.tabs.currentIndex()
-        if idx < 0:
+        # Verhindere das Löschen des letzten Tabs (+ Plus-Tab)
+        actual_tabs = self.tabs.count() - 1  # -1 für den + Tab
+        if actual_tabs <= 1:
             return
+            
+        idx = self.tabs.currentIndex()
+        if idx < 0 or self._is_plus_tab(idx):
+            return
+            
+        # Entferne + Tab temporär
+        self._remove_plus_tab()
+        
         if self.is_server and self.manager:
             inst = self.config.servers[idx]
             self._remove_endpoint(inst)
@@ -297,22 +423,30 @@ class InstanceTabWidget(QWidget):
             instances = getattr(self.config, 'clients', [])
         del instances[idx]
         self.tabs.removeTab(idx)
-        self._update_delete_button()
+        
+        # Füge + Tab wieder hinzu
+        self._add_plus_tab()
 
     def _on_close_tab(self, idx):
+        # Verhindere das Schließen des + Tabs
+        if self._is_plus_tab(idx):
+            return
         self.tabs.setCurrentIndex(idx)
         self._delete_instance()
 
     def _on_tab_changed(self, idx):
-        self._update_delete_button()
-
-    def _update_delete_button(self):
-        self.del_btn.setEnabled(self.tabs.count() > 1)
+        # Wenn der + Tab ausgewählt wird, erstelle eine neue Instanz
+        if idx >= 0 and self._is_plus_tab(idx):
+            self._add_instance()
 
     def _on_defaults_changed(self):
         """Called when default values are changed."""
         # Update all instance widgets to reflect new defaults
         for i in range(self.tabs.count()):
+            # Skip the + tab
+            if self._is_plus_tab(i):
+                continue
+                
             widget = self.tabs.widget(i)
             if self.is_server:
                 # Update server instance defaults reference

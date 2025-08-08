@@ -4,7 +4,7 @@ import requests
 from jinja2 import Environment
 
 class ClientThread(threading.Thread):
-    def __init__(self, name, host, route, method, request_data, period_sec=1.0, loop=False, initial_delay_sec=0.0, on_response=None):
+    def __init__(self, name, host, route, method, request_data, period_sec=1.0, loop=False, initial_delay_sec=0.0, on_response=None, counter=0):
         super().__init__()
         self.name = name
         self.host = host
@@ -16,6 +16,7 @@ class ClientThread(threading.Thread):
         self._stop_event = threading.Event()
         self.initial_delay_sec = initial_delay_sec
         self.on_response = on_response
+        self.counter = counter
 
         self.env = Environment(
          autoescape=False
@@ -23,6 +24,10 @@ class ClientThread(threading.Thread):
 
     def run(self):
 
+        if not self.host or not self.route:
+            print(f"[Client {self.name}] Error: Host and route must be set before starting.")
+            return
+        
         url = f"http://{self.host}{self.route}"
         
 
@@ -34,13 +39,21 @@ class ClientThread(threading.Thread):
                 headers = {"Content-Type": "application/json"}
                 if self.request_data:
                     try:
+
+                        # render paylooad
                         json_template_request = self.env.from_string(self.request_data)
-                        rendered_json_request = json_template_request.render( time=time, random=random, json=json, math=math, os=os, sys=sys, datetime=datetime)
+                        rendered_json_request = json_template_request.render( time=time, random=random, json=json, math=math, os=os, sys=sys, datetime=datetime, counter=self.counter)
                         json_data = json.loads(rendered_json_request)
+
                     except Exception:
                         data = self.request_data
-                resp = requests.request(self.method, url, json=json_data, data=data, headers=headers)
 
+                #render url
+                json_template_url = self.env.from_string(url)
+                rendered_url = json_template_url.render( time=time, random=random, json=json, math=math, os=os, sys=sys, datetime=datetime, counter=self.counter)
+
+                resp = requests.request(self.method, rendered_url, json=json_data, data=data, headers=headers)
+                self.counter += 1
 
                 if self.on_response:
                     self.on_response(self.name, resp)
@@ -59,10 +72,12 @@ class ClientThread(threading.Thread):
 class RestClientManager:
     def __init__(self):
         self.clients = {}  # name: ClientThread
+        self.counter = 0  # Global counter for all clients
 
     def start_client(self, name, host, route, method, request_data, period_sec=1.0, loop=False, initial_delay_sec=0.0, on_response=None):
         self.stop_client(name)
-        thread = ClientThread(name, host, route, method, request_data, period_sec, loop, initial_delay_sec, on_response)
+        thread = ClientThread(name, host, route, method, request_data, period_sec, loop, initial_delay_sec, on_response, self.counter)
+        self.counter += 1 
         self.clients[name] = thread
         thread.start()
 

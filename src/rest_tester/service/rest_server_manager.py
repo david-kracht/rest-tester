@@ -15,7 +15,7 @@ class ServerThread(threading.Thread):
         self._shutdown = threading.Event()
         self._endpoints = {}  # endpoint: (methods, handler)
         # Register generic route
-        self.app.add_url_rule("/<path:endpoint>", "dynamic", self._dispatch, methods=["GET", "POST", "PUT", "DELETE"])
+        self.app.add_url_rule("/<path:endpoint>", "dynamic", self._dispatch, methods=["GET", "POST"])
         # Add dummy shutdown endpoint
         self.app.add_url_rule("/__shutdown__", "__shutdown__", lambda: "shutting down", methods=["GET"])
 
