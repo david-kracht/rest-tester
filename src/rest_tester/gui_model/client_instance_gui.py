@@ -325,8 +325,11 @@ class ClientInstanceWidget(QWidget):
             pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
             self.request_edit.setPlainText(pretty)
             self.request_edit.setStyleSheet("")
+        
+        #TODO: rework validation (of rendered template)
         except Exception:
-            self.request_edit.setStyleSheet("background-color: #ffcccc;")
+            pass
+        #    self.request_edit.setStyleSheet("background-color: #ffcccc;")
 
     def _request_focus_out_event(self, event):
         text = self.request_edit.toPlainText()

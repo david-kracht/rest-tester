@@ -315,8 +315,10 @@ class ServerInstanceWidget(QWidget):
             pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
             self.response_edit.setPlainText(pretty)
             self.response_edit.setStyleSheet("")
+        #TODO: Rework validation (of rendered template) 
         except Exception:
-            self.response_edit.setStyleSheet("background-color: #ffcccc;")
+            pass
+        #    self.response_edit.setStyleSheet("background-color: #ffcccc;")
 
     def _response_focus_out_event(self, event):
         # Wenn Response-Feld geleert wird, auf Default zurücksetzen

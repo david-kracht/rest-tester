@@ -216,12 +216,16 @@ class InstanceTabWidget(QWidget):
     def _register_endpoint(self, inst):
         from .service.endpoint_utils import make_generic_handler
         host, port, route, methods, response, response_delay_sec, initial_delay_sec = self._get_endpoint_params(inst)
+        
+        #TODO: fix to early validation
+        '''
         try:
             import json
             response_json = json.loads(response) if response else {}
         except Exception:
             response_json = {"error": "invalid response json"}
-        handler = make_generic_handler(response_json, response_delay_sec)
+        '''
+        handler = make_generic_handler(response, response_delay_sec)
 
         # put call with potential initial delay in background thread
         thread = threading.Thread(target=self.manager.add_endpoint, args=(host, port, route, methods, initial_delay_sec, handler))

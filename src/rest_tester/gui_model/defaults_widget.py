@@ -470,11 +470,15 @@ class DefaultsWidget(QWidget):
             pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
             self.response_edit.setPlainText(pretty)
             self.response_edit.setStyleSheet("")
+        #TODO: rework validation (of rendered template)
         except Exception:
+            pass
+            '''
             if text.strip():  # Only show error if there's content
                 self.response_edit.setStyleSheet("background-color: #ffcccc;")
             else:
                 self.response_edit.setStyleSheet("")
+            '''
                 
     def _validate_and_pretty_request(self):
         """Validate and format request JSON."""
@@ -487,11 +491,15 @@ class DefaultsWidget(QWidget):
             pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
             self.request_edit.setPlainText(pretty)
             self.request_edit.setStyleSheet("")
+        #TODO: rework validation (of rendered template)
         except Exception:
+            pass
+            '''
             if text.strip():  # Only show error if there's content
                 self.request_edit.setStyleSheet("background-color: #ffcccc;")
             else:
                 self.request_edit.setStyleSheet("")
+            '''
                 
     def _response_focus_out_event(self, event):
         """Handle response field focus out."""

@@ -55,6 +55,10 @@ class ClientThread(threading.Thread):
                 resp = requests.request(self.method, rendered_url, json=json_data, data=data, headers=headers)
                 self.counter += 1
 
+                print("----- Request JSON -----")
+                print(json.dumps(json_data, indent=2, ensure_ascii=False))
+                print("------------------------")
+
                 if self.on_response:
                     self.on_response(self.name, resp)
                 else:

@@ -15,21 +15,26 @@ class ServerThread(threading.Thread):
         self._shutdown = threading.Event()
         self._endpoints = {}  # endpoint: (methods, handler)
         # Register generic route
-        self.app.add_url_rule("/<path:endpoint>", "dynamic", self._dispatch, methods=["GET", "POST"])
+        # self.app.add_url_rule("/<path:endpoint>", "dynamic", self._dispatch, methods=["GET", "POST"])
         # Add dummy shutdown endpoint
         self.app.add_url_rule("/__shutdown__", "__shutdown__", lambda: "shutting down", methods=["GET"])
 
-    def _dispatch(self, endpoint):
-        path = f"/{endpoint}"
-        handler_info = self._endpoints.get(path)
+    def _dispatch(self, **args):
+        handler_info = self._endpoints.get(request.url_rule.rule)
+
         if handler_info and request.method in handler_info[0]:
             # Übergib das request-Objekt an den Handler
             return handler_info[1](request)
+        
         return ("Not found", 404)
 
     def add_endpoint(self, endpoint, methods, initial_delay_sec, handler):
         time.sleep(initial_delay_sec)
-        self.logger.info(f"Register endpoint {endpoint} on {self.host}:{self.port}")
+        if endpoint not in self._endpoints:
+            self.logger.info(f"Register endpoint {endpoint} on {self.host}:{self.port}")
+            self.app.add_url_rule(endpoint, endpoint, view_func=self._dispatch, methods=["GET", "POST","PUT","DELETE"])
+        else:
+            self.logger.info(f"Update handler for endpoint {endpoint} on {self.host}:{self.port}")
         self._endpoints[endpoint] = (methods, handler)
 
     def remove_endpoint(self, endpoint):
